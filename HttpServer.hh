@@ -104,6 +104,7 @@ class Response
 	public:
 
 	int sock; // Socket
+	Request *req; // for http headers
 
 	int statusCode = 200;
 	std::map<std::string, std::string> headers;
@@ -147,7 +148,9 @@ class Response
 		this->headers["Content-Length"] = std::to_string(this->body.length());
 		this->headers["Conection"] = "close";
 
-		head = "HTTP/1.1 ";
+		head = "HTTP/1.";
+		head += this->req->httpMinorVersion == 0 ? '0' : '1';
+		head += " ";
 		head += std::to_string(this->statusCode);
 		head += " ";
 		head += httpStatusMessage(this->statusCode);
@@ -208,9 +211,8 @@ class Server
 
 	public:
 
-	std::string ip     = "0.0.0.0";
-	int port           = 5000;
-	int maxConnections = 10;
+	std::string ip = "0.0.0.0";
+	int port       = 5000;
 
 	/**
 	 * On request callback
@@ -390,6 +392,7 @@ static void serverRequestHandler(Server *server, int sock, struct sockaddr_in cl
 	// New response
 	res = new Response;
 	res->sock = sock;
+	res->req  = req;
 
 	// Recv buffer
 	buffer = new char[1+RECV_BUFFER_SIZE];
