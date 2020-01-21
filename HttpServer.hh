@@ -11,8 +11,14 @@
 
 /**
  * Compile:
+ * Linux:
  * g++ example.cc HttpServer.hh -std=c++11 -Wall -pthread -O3 -o example.out
  * ./example.out <port>
+ *
+ * Windows:
+ * g++ example.cc HttpServer.hh -std=c++11 -Wall -lwsock32 -O3 -IC:\MinGW\include -o example.exe
+ * ./example.exe <port>
+ *
  *
  * Resources:
  * https://linux.die.net/man/7/socket
@@ -27,20 +33,29 @@
 #define EXAMPLEHTTPSERVER_H
 
 #include <iostream> // std::string, std::cout
-#include <map> // std::map
 #include <thread> // std::thread
+#include <map> // std::map
 #include <functional> // std::function
 #include <unistd.h> // close
 #include <string.h> // memset, strerror
+
+#ifdef __linux__
 #include <netinet/tcp.h> // TCP_NODELAY
 #include <arpa/inet.h> // struct in_addr, htons
+#else
+#include <stdio.h>
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#endif
 
 #define _FUNC    __PRETTY_FUNCTION__
 #define _FILE    __FILE__
 #define _LINE    __LINE__
 #define _STRERR  strerror(errno)
 
-#define ERROR(message, func, line)\
+#define APPERROR(message, func, line)\
 fprintf(stderr, "%s,  function %s, line %d\n", message, func, line);
 
 #define BACKLOG_SIZE     150
@@ -168,14 +183,14 @@ class Response
 		sendLen = this->write(head.c_str(), head.length());
 		if (sendLen < 0) {
 			head.clear();
-			ERROR(_STRERR, _FUNC, _LINE);
+			APPERROR(_STRERR, _FUNC, _LINE);
 			return false;
 		}
 
 		sendLen = this->write(this->body.c_str(), this->body.length());
 		if (sendLen < 0) {
 			head.clear();
-			ERROR(_STRERR, _FUNC, _LINE);
+			APPERROR(_STRERR, _FUNC, _LINE);
 			return false;
 		}
 
@@ -405,7 +420,7 @@ static void serverRequestHandler(Server *server, int sock, struct sockaddr_in cl
 			break;
 		}
 		else if (recvLen < 0) {
-			ERROR(_STRERR, _FUNC, _LINE);
+			APPERROR(_STRERR, _FUNC, _LINE);
 			break;
 		}
 
@@ -449,29 +464,48 @@ bool createServer(Server *server)
 {
 	int st;
 	int serverFd;
-	int optVal = 1;
 
 	// Create new TCP socket(int family, int type, int protocol)
+#ifdef __linux__
 	serverFd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+	WSADATA WSAData;
+	WSAStartup(MAKEWORD(2,0), &WSAData);
+	serverFd = socket(AF_INET, SOCK_STREAM, 0);
+#endif
+
 	if (serverFd < 0) {
-		ERROR(_STRERR, _FUNC, _LINE);
+		APPERROR(_STRERR, _FUNC, _LINE);
 		return false;
 	}
 
 	// Socket options
-	// nodelay
+#ifdef __linux__
+	int optVal = 1;
+
+	// Re use address
 	st = setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, (void *)&optVal, sizeof(int));
 	if (st == -1) {
-		ERROR(_STRERR, _FUNC, _LINE);
+		APPERROR(_STRERR, _FUNC, _LINE);
 		return false;
 	}
 
-	// nodelay
+	// No-delay
 	st = setsockopt(serverFd, IPPROTO_TCP, TCP_NODELAY, (void *)&optVal, sizeof(int));
 	if (st == -1) {
-		ERROR(_STRERR, _FUNC, _LINE);
+		APPERROR(_STRERR, _FUNC, _LINE);
 		return false;
 	}
+#else
+	bool bOptVal = true;
+
+	// No-delay
+	int iResult = setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, (char *)&bOptVal, sizeof(bool));
+	if (iResult == SOCKET_ERROR) {
+		APPERROR(_STRERR, _FUNC, _LINE);
+		return 1;
+	}
+#endif
 
 	// Bind
 	struct sockaddr_in sockAddr;
@@ -483,14 +517,14 @@ bool createServer(Server *server)
 
 	st = bind(serverFd, (struct sockaddr *)&sockAddr, sizeof(struct sockaddr_in));
 	if (st == -1) {
-		ERROR(_STRERR, _FUNC, _LINE);
+		APPERROR(_STRERR, _FUNC, _LINE);
 		return false;
 	}
 
 	// Listen
 	st = listen(serverFd, BACKLOG_SIZE);
 	if (st < 0) {
-		ERROR(_STRERR, _FUNC, _LINE);
+		APPERROR(_STRERR, _FUNC, _LINE);
 		return false;
 	}
 
@@ -513,10 +547,18 @@ bool createServer(Server *server)
 		}
 
 		// New thread per connection
+#ifdef __linux__
 		std::thread(serverRequestHandler, server, std::move(clientFd), std::move(clientAddr)).detach();
+#else
+		serverRequestHandler(server, clientFd, clientAddr);
+#endif
 	}
 
 	close(serverFd);
+
+#ifndef __linux__
+	WSACleanup();
+#endif
 
 	return true;
 }
