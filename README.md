@@ -2,7 +2,7 @@
 
 ## About
 
-This project is an example for linux socket programming.
+This project is an example for socket programming.
 
 - No goals
 - Do not use in production
